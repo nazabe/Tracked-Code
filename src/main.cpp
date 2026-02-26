@@ -1,194 +1,139 @@
-#include <WiFiManager.h> 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiManager.h>
+#include <PubSubClient.h>
 
 #define TINY_GSM_MODEM_SIM7600
-
-// Set serial for debug console (to the Serial Monitor, speed 115200)
-#define Serial Serial
-
-// Set serial for AT commands (to the module)
-// Use Hardware Serial on Mega, Leonardo, Micro
-#ifndef __AVR_ATmega328P__
-#define SerialAT Serial1
-
-// // or Software Serial on Uno, Nano
-#else
-#include <SoftwareSerial.h>
-SoftwareSerial SerialAT(17, 18);  // RX, TX
-#endif
-
-#define TINY_GSM_DEBUG Serial
-
 #include <TinyGsmClient.h>
 
-#include <OneWire.h>
+#include "secrets.h"
+// secrets.h should define:
+// const char* mqtt_broker
+// const int   mqtt_port
+// const char* mqtt_username
+// const char* mqtt_password
+// const char* topic
 
-// OneWire DS18S20, DS18B20, DS1822 Temperature Example
-//
-// http://www.pjrc.com/teensy/td_libs_OneWire.html
-//
-// The DallasTemperature library can do all this work for you!
-// https://github.com/milesburton/Arduino-Temperature-Control-Library
+// ── Serial ports ──────────────────────────────────────────
+#define SerialAT  Serial2          // GPIO16=RX2, GPIO17=TX2
+#define SerialMon Serial
 
-OneWire  ds(12);  // on pin 10 (a 4.7K resistor is necessary)
+// ── MQTT topics ───────────────────────────────────────────
+const char* topicGPS    = "tracker/gps";
+const char* topicStatus = "tracker/status";
 
-// Module baud rate
-uint32_t rate = 0;  // Set to 0 for Auto-Detect
+// ── TinyGSM ───────────────────────────────────────────────
+TinyGsm modem(SerialAT);
 
-void setup() {
-  Serial.begin(115200);
+// ── MQTT over WiFi ────────────────────────────────────────
+WiFiClient   espClient;
+PubSubClient mqtt(espClient);
 
-  delay(6000);
+uint32_t lastPublish       = 0;
+uint32_t lastReconnect     = 0;
+const uint32_t PUBLISH_INTERVAL   = 5000;   // publish GPS every 5s
+const uint32_t RECONNECT_INTERVAL = 10000;
 
-  WiFiManager wm;
-
-  bool res;
-  // res = wm.autoConnect(); // auto generated AP name from chipid
-  // res = wm.autoConnect("AutoConnectAP"); // anonymous ap
-  res = wm.autoConnect("Tracked Code AP","12345678"); // password protected ap
-
-  if(!res) {
-      Serial.println("Failed to connect");
-      // ESP.restart();
-  } 
-  else {
-      //if you get here you have connected to the WiFi    
-      Serial.println("connected...yeey :)");
-      Serial.println("Hello World!");
-  }
-
+// ──────────────────────────────────────────────────────────
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    SerialMon.print("MQTT message [");
+    SerialMon.print(topic);
+    SerialMon.print("]: ");
+    for (unsigned int i = 0; i < length; i++) SerialMon.print((char)payload[i]);
+    SerialMon.println();
 }
 
-void loop(void) {
-  byte i;
-  byte present = 0;
-  byte type_s;
-  byte data[9];
-  byte addr[8];
-  float celsius, fahrenheit;
-  
-  if ( !ds.search(addr)) {
-    Serial.println("No more addresses.");
-    Serial.println();
-    ds.reset_search();
-    delay(250);
-    return;
-  }
-  
-  Serial.print("ROM =");
-  for( i = 0; i < 8; i++) {
-    Serial.write(' ');
-    Serial.print(addr[i], HEX);
-  }
+bool mqttReconnect() {
+    String clientId = "esp32-tracker-" + String(WiFi.macAddress());
+    SerialMon.printf("Connecting to MQTT broker as %s... ", clientId.c_str());
 
-  if (OneWire::crc8(addr, 7) != addr[7]) {
-      Serial.println("CRC is not valid!");
-      return;
-  }
-  Serial.println();
- 
-  // the first ROM byte indicates which chip
-  switch (addr[0]) {
-    case 0x10:
-      Serial.println("  Chip = DS18S20");  // or old DS1820
-      type_s = 1;
-      break;
-    case 0x28:
-      Serial.println("  Chip = DS18B20");
-      type_s = 0;
-      break;
-    case 0x22:
-      Serial.println("  Chip = DS1822");
-      type_s = 0;
-      break;
-    default:
-      Serial.println("Device is not a DS18x20 family device.");
-      return;
-  } 
-
-  ds.reset();
-  ds.select(addr);
-  ds.write(0x44, 1);        // start conversion, with parasite power on at the end
-  
-  delay(1000);     // maybe 750ms is enough, maybe not
-  // we might do a ds.depower() here, but the reset will take care of it.
-  
-  present = ds.reset();
-  ds.select(addr);    
-  ds.write(0xBE);         // Read Scratchpad
-
-  Serial.print("  Data = ");
-  Serial.print(present, HEX);
-  Serial.print(" ");
-  for ( i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-    Serial.print(data[i], HEX);
-    Serial.print(" ");
-  }
-  Serial.print(" CRC=");
-  Serial.print(OneWire::crc8(data, 8), HEX);
-  Serial.println();
-
-  // Convert the data to actual temperature
-  // because the result is a 16 bit signed integer, it should
-  // be stored to an "int16_t" type, which is always 16 bits
-  // even when compiled on a 32 bit processor.
-  int16_t raw = (data[1] << 8) | data[0];
-  if (type_s) {
-    raw = raw << 3; // 9 bit resolution default
-    if (data[7] == 0x10) {
-      // "count remain" gives full 12 bit resolution
-      raw = (raw & 0xFFF0) + 12 - data[6];
+    if (mqtt.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
+        SerialMon.println("connected!");
+        mqtt.publish(topicStatus, "Tracker online");
+        mqtt.subscribe(topicStatus);  // add more subscriptions if needed
+    } else {
+        SerialMon.printf("failed, rc=%d\n", mqtt.state());
     }
-  } else {
-    byte cfg = (data[4] & 0x60);
-    // at lower res, the low bits are undefined, so let's zero them
-    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
-    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
-    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
-    //// default is 12 bit resolution, 750 ms conversion time
-  }
-  celsius = (float)raw / 16.0;
-  fahrenheit = celsius * 1.8 + 32.0;
-  Serial.print("  Temperature = ");
-  Serial.print(celsius);
-  Serial.print(" Celsius, ");
-  Serial.print(fahrenheit);
-  Serial.println(" Fahrenheit");
+    return mqtt.connected();
 }
 
-// void loop() {
-//   if (!rate) { rate = TinyGsmAutoBaud(SerialAT); }
+// Returns a JSON string with GPS data, or empty string on failure
+String getGPSData() {
+    float lat      = 0, lon  = 0, speed = 0, alt = 0;
+    int   vsat     = 0, usat = 0;
+    float accuracy = 0;
+    int   year     = 0, month = 0, day  = 0;
+    int   hour     = 0, min   = 0, sec  = 0;
 
-//   if (!rate) {
-//     Serial.println(
-//         F("***********************************************************"));
-//     Serial.println(F(" Module does not respond!"));
-//     Serial.println(F("   Check your Serial wiring"));
-//     Serial.println(
-//         F("   Check the module is correctly powered and turned on"));
-//     Serial.println(
-//         F("***********************************************************"));
-//     delay(30000L);
-//     return;
-//   }
+    if (!modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
+                      &year, &month, &day, &hour, &min, &sec)) {
+        return "";   // no fix yet
+    }
 
-//   SerialAT.begin(rate);
+    char buf[200];
+    snprintf(buf, sizeof(buf),
+        "{\"lat\":%.6f,\"lon\":%.6f,\"alt\":%.1f,"
+        "\"speed\":%.1f,\"accuracy\":%.1f,"
+        "\"datetime\":\"%04d-%02d-%02dT%02d:%02d:%02dZ\"}",
+        lat, lon, alt, speed, accuracy,
+        year, month, day, hour, min, sec);
+    return String(buf);
+}
 
-//   // Access AT commands from Serial Monitor
-//   Serial.println(
-//       F("***********************************************************"));
-//   Serial.println(F(" You can now send AT commands"));
-//   Serial.println(
-//       F(" Enter \"AT\" (without quotes), and you should see \"OK\""));
-//   Serial.println(
-//       F(" If it doesn't work, select \"Both NL & CR\" in Serial Monitor"));
-//   Serial.println(
-//       F("***********************************************************"));
+// ──────────────────────────────────────────────────────────
+void setup() {
+    SerialMon.begin(115200);
+    SerialAT.begin(115200, SERIAL_8N1, 16, 17);  // RX=16, TX=17
+    delay(3000);
 
-//   while (true) {
-//     if (SerialAT.available()) { Serial.write(SerialAT.read()); }
-//     if (Serial.available()) { SerialAT.write(Serial.read()); }
-//     delay(0);
-//   }
-// }
+    // ── Init modem ────────────────────────────────────────
+    SerialMon.println("Initializing SIM7600 modem...");
+    modem.restart();
+    SerialMon.print("Modem: ");
+    SerialMon.println(modem.getModemInfo());
+
+    // ── Enable GPS ────────────────────────────────────────
+    SerialMon.println("Enabling GPS...");
+    modem.enableGPS();
+
+    // ── Connect WiFi via WiFiManager ──────────────────────
+    WiFiManager wm;
+    SerialMon.println("Starting WiFiManager...");
+    if (!wm.autoConnect("Tracker-AP", "12345678")) {
+        SerialMon.println("WiFi connection failed! Restarting...");
+        ESP.restart();
+    }
+    SerialMon.println("WiFi connected: " + WiFi.localIP().toString());
+
+    // ── Setup MQTT ────────────────────────────────────────
+    mqtt.setServer(mqtt_broker, mqtt_port);
+    mqtt.setCallback(mqttCallback);
+}
+
+// ──────────────────────────────────────────────────────────
+void loop() {
+    // Keep MQTT alive
+    if (!mqtt.connected()) {
+        uint32_t now = millis();
+        if (now - lastReconnect > RECONNECT_INTERVAL) {
+            lastReconnect = now;
+            mqttReconnect();
+        }
+    } else {
+        mqtt.loop();
+
+        // Publish GPS every PUBLISH_INTERVAL ms
+        if (millis() - lastPublish > PUBLISH_INTERVAL) {
+            lastPublish = millis();
+
+            String gpsJson = getGPSData();
+            if (gpsJson.length() > 0) {
+                SerialMon.println("Publishing GPS: " + gpsJson);
+                mqtt.publish(topicGPS, gpsJson.c_str());
+            } else {
+                SerialMon.println("Waiting for GPS fix...");
+                mqtt.publish(topicStatus, "Waiting for GPS fix");
+            }
+        }
+    }
+}
