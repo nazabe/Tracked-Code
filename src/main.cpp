@@ -203,7 +203,7 @@ void loop()
     mqtt.loop();
 
     // Debug temporal — ver SNR de satélites
-    if (millis() - lastPublish > 5000)
+    if (millis() - lastPublish > 2000)
     {
         lastPublish = millis();
         String gps = getGPSData();
