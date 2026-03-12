@@ -5,143 +5,181 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>GPS Tracker</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body, html { width: 100%; height: 100%; overflow: hidden; background: #0b0f1a; }
-
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #060a12; }
     #map { width: 100%; height: 100vh; }
 
-    /* ── HUD flotante ── */
+    /* ── HUD ── */
     #hud {
       position: fixed;
       bottom: 20px;
       right: 20px;
       z-index: 1000;
-      background: rgba(11, 15, 26, 0.82);
-      border: 1px solid #1f2d3d;
-      border-radius: 6px;
-      padding: 12px 16px;
-      font-family: 'Courier New', monospace;
-      font-size: 0.68rem;
-      color: #64748b;
-      backdrop-filter: blur(10px);
-      min-width: 180px;
-      line-height: 1.8;
+      background: rgba(6, 10, 18, 0.88);
+      border: 1px solid #0ff2;
+      border-radius: 2px;
+      padding: 14px 18px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem;
+      color: #4a6a8a;
+      backdrop-filter: blur(14px);
+      min-width: 190px;
+      line-height: 2;
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
     }
 
-    #hud b { color: #00e5ff; }
+    #hud::before {
+      content: '';
+      position: absolute;
+      top: 0; right: 10px;
+      width: 1px; height: 10px;
+      background: #00e5ff;
+      transform-origin: top right;
+      transform: rotate(45deg) translateX(7px);
+    }
+
+    #hud .hud-title {
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 700;
+      font-size: 0.6rem;
+      letter-spacing: 3px;
+      color: #00e5ff66;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    #hud b { color: #00e5ff; font-weight: normal; }
 
     #hud .dot {
       display: inline-block;
-      width: 7px; height: 7px;
+      width: 6px; height: 6px;
       border-radius: 50%;
       background: #ef4444;
-      margin-right: 5px;
+      margin-right: 6px;
       vertical-align: middle;
       transition: background 0.3s;
     }
     #hud .dot.on { background: #22c55e; animation: blink 1.5s infinite; }
 
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
-    }
-
-    .leaflet-popup-content-wrapper {
-      background: #111827;
-      color: #e2e8f0;
-      border: 1px solid #1f2d3d;
-      border-radius: 4px;
-      font-family: 'Courier New', monospace;
-      font-size: 0.72rem;
-    }
-    .leaflet-popup-tip { background: #111827; }
-
-    /* ── Panel de calibración ── */
-    #calib {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1000;
-      background: rgba(11, 15, 26, 0.82);
-      border: 1px solid #1f2d3d;
-      border-radius: 6px;
-      padding: 12px 16px;
-      font-family: 'Courier New', monospace;
-      font-size: 0.68rem;
-      color: #64748b;
-      backdrop-filter: blur(10px);
-      min-width: 200px;
-      line-height: 1.8;
-    }
-
-    #calib .calib-title {
-      color: #00e5ff;
-      letter-spacing: 2px;
-      font-size: 0.62rem;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-      display: block;
-    }
-
-    #calib .calib-row {
+    /* ── Temperatura en HUD ── */
+    #hud .temp-row {
+      margin-top: 2px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 5px;
+      gap: 6px;
     }
 
-    #calib label { color: #64748b; min-width: 60px; }
-
-    #calib input[type="number"] {
-      background: #0b0f1a;
-      border: 1px solid #1f2d3d;
-      border-radius: 3px;
-      color: #00e5ff;
-      font-family: 'Courier New', monospace;
-      font-size: 0.68rem;
-      padding: 3px 6px;
-      width: 90px;
-      text-align: right;
-      outline: none;
-      transition: border-color 0.2s;
+    #hud .temp-bar-wrap {
+      flex: 1;
+      height: 3px;
+      background: #0ff1;
+      border-radius: 2px;
+      overflow: hidden;
     }
 
-    #calib input[type="number"]:focus { border-color: #00e5ff55; }
+    #hud .temp-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 2px;
+      transition: width 0.6s ease, background 0.6s ease;
+    }
 
-    #calib .calib-hint {
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.2; }
+    }
+
+    /* ── Popup ── */
+    .leaflet-popup-content-wrapper {
+      background: #080e1a;
+      color: #e2e8f0;
+      border: 1px solid #0ff2;
+      border-radius: 2px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem;
+      padding: 0;
+    }
+    .leaflet-popup-content { margin: 12px 14px; }
+    .leaflet-popup-tip { background: #080e1a; }
+
+    .popup-coords { color: #00e5ff; font-size: 0.72rem; margin-bottom: 6px; }
+    .popup-row { color: #4a6a8a; margin-bottom: 2px; }
+    .popup-row b { color: #94a3b8; }
+
+    /* ── Temperatura badge flotante sobre el punto ── */
+    .temp-badge {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      font-weight: bold;
+      white-space: nowrap;
+      padding: 2px 5px;
+      border-radius: 2px;
+      border: 1px solid currentColor;
+      opacity: 0.92;
+      pointer-events: none;
+    }
+
+    /* ── Leyenda temperatura ── */
+    #legend {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 1000;
+      background: rgba(6, 10, 18, 0.88);
+      border: 1px solid #0ff2;
+      border-radius: 2px;
+      padding: 10px 14px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.62rem;
+      color: #4a6a8a;
+      backdrop-filter: blur(14px);
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+    }
+
+    #legend .leg-title {
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 700;
       font-size: 0.58rem;
-      color: #334155;
-      margin-top: 6px;
-      line-height: 1.4;
+      letter-spacing: 3px;
+      color: #00e5ff55;
+      text-transform: uppercase;
+      margin-bottom: 6px;
     }
+
+    .leg-row { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   </style>
 </head>
 <body>
 
 <div id="map"></div>
 
-<!-- <div id="calib">
-  <span class="calib-title">⊕ Calibración GPS</span>
-  <div class="calib-row">
-    <label>LAT fix</label>
-    <input type="number" id="lat-fix" value="0" step="0.0001">
-  </div>
-  <div class="calib-row">
-    <label>LON fix</label>
-    <input type="number" id="lon-fix" value="0" step="0.0001">
-  </div>
-  <div class="calib-hint">Valores positivos/negativos<br>se suman a cada coordenada.</div>
-</div> -->
-
 <div id="hud">
+  <div class="hud-title">◈ GPS TRACKER</div>
   <span><span class="dot" id="dot"></span><span id="status">DESCONECTADO</span></span><br>
-  LAT: <b id="h-lat">--</b><br>
-  LON: <b id="h-lon">--</b><br>
-  VEL: <b id="h-spd">--</b> km/h<br>
-  PTS: <b id="h-pts">0</b>
+  LAT &nbsp;<b id="h-lat">--</b><br>
+  LON &nbsp;<b id="h-lon">--</b><br>
+  VEL &nbsp;<b id="h-spd">--</b> km/h<br>
+  ALT &nbsp;<b id="h-alt">--</b> m<br>
+  PTS &nbsp;<b id="h-pts">0</b>
+  <div class="temp-row">
+    TEMP <b id="h-tmp">-- °C</b>
+  </div>
+  <div class="temp-bar-wrap" style="margin-top:4px">
+    <div class="temp-bar" id="temp-bar"></div>
+  </div>
+</div>
+
+<div id="legend">
+  <div class="leg-title">⬡ Temperatura</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#22d3ee"></div> &lt; 10 °C</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#22c55e"></div> 10 – 24 °C</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#facc15"></div> 25 – 34 °C</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f97316"></div> 35 – 44 °C</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ef4444"></div> ≥ 45 °C</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -167,7 +205,8 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 }).addTo(map);
 
 const polyline = L.polyline([], {
-  color: '#00e5ff', weight: 2, opacity: 0.55
+  color: '#00e5ff', weight: 2, opacity: 0.4,
+  dashArray: '4 6'
 }).addTo(map);
 
 let liveMarker = null;
@@ -176,47 +215,53 @@ let pointCount = 0;
 const liveIcon = L.divIcon({
   className: '',
   html: `<div style="
-    width:13px;height:13px;border-radius:50%;
+    width:14px;height:14px;border-radius:50%;
     background:#00e5ff;border:2px solid #fff;
-    box-shadow:0 0 10px #00e5ff88;
+    box-shadow:0 0 0 4px #00e5ff22, 0 0 16px #00e5ffaa;
   "></div>`,
-  iconSize: [13, 13],
-  iconAnchor: [6, 6]
+  iconSize: [14, 14],
+  iconAnchor: [7, 7]
 });
 
 // ═══════════════════════════════════════
-// PARSEO DE COORDENADAS
-//
-// El firmware manda dos formatos distintos con bugs:
-//   lat → NMEA "DDMM.MMMMMM" con DD incorrecto (ej: "1227.450601" = 12°27′ en vez de 27°27′)
-//   lon → decimal puro con hemisferio pegado    (ej: "S58.988735" = -58.988735°)
-//
-// Para lat: se ignoran los grados del raw y se usan los minutos
-//   con LAT_DEG fijo (27°) conocido de la región.
-// Para lon: se elimina la letra y se toma el número directo con signo W.
+// TEMPERATURA → COLOR
 // ═══════════════════════════════════════
-const LAT_DEG = 27; // grados reales de la región (Chaco, Argentina)
+function tempColor(t) {
+  if (t === null) return '#475569';
+  if (t < 10)  return '#22d3ee';
+  if (t < 25)  return '#22c55e';
+  if (t < 35)  return '#facc15';
+  if (t < 45)  return '#f97316';
+  return '#ef4444';
+}
+
+// Normaliza 0–60°C → 0–100% para la barra
+function tempPercent(t) {
+  if (t === null) return 0;
+  return Math.min(100, Math.max(0, (t / 60) * 100));
+}
+
+// ═══════════════════════════════════════
+// PARSEO DE COORDENADAS (igual al original)
+// ═══════════════════════════════════════
+const LAT_DEG = 27;
 
 function parseCoords(rawLat, rawLon) {
-  // ── Latitud: extraer minutos del NMEA y reconstruir con grados reales
   let lat = null;
   if (rawLat) {
     const numStr = rawLat.toString().replace(/[NSEW]/gi, '');
     const num    = parseFloat(numStr);
     if (!isNaN(num)) {
-      const min = num - Math.floor(num / 100) * 100; // descartar DD corruptos
-      lat = parseFloat((-(LAT_DEG + min / 60)).toFixed(6)); // hemisferio S fijo
+      const min = num - Math.floor(num / 100) * 100;
+      lat = parseFloat((-(LAT_DEG + min / 60)).toFixed(6));
     }
   }
-
-  // ── Longitud: decimal puro, solo quitar letra y aplicar signo W
   let lon = null;
   if (rawLon) {
     const numStr = rawLon.toString().replace(/[NSEW]/gi, '');
     const val    = parseFloat(numStr);
     if (!isNaN(val)) lon = parseFloat((-Math.abs(val)).toFixed(6));
   }
-
   if (lat === null || lon === null) return { lat: null, lon: null };
   if (Math.abs(lat) < 1.0 || Math.abs(lon) < 1.0) return { lat: null, lon: null };
   return { lat, lon };
@@ -237,48 +282,74 @@ function handleMessage(payload) {
   const lon = rawPLon !== null ? parseFloat((rawPLon + lonFix).toFixed(6)) : null;
 
   if (lat === null || lon === null) {
-    console.warn('Coordenadas inválidas o sin fix GPS:', rawLat, rawLon);
+    console.warn('Coordenadas inválidas o sin fix GPS:', data.lat, data.lon);
     return;
   }
 
   const speed = parseFloat(data.speed || 0);
-  const temp  = data.temp != null ? parseFloat(data.temp) : null;
+  const alt   = parseFloat(data.alt   || 0);
+  // ← campo corregido: temp_c (igual al JSON del firmware)
+  const temp  = data.temp_c != null ? parseFloat(data.temp_c) : null;
+  const color = tempColor(temp);
 
-  // HUD
+  // ── HUD ──────────────────────────────
   document.getElementById('h-lat').textContent = lat.toFixed(5) + '°';
   document.getElementById('h-lon').textContent = lon.toFixed(5) + '°';
   document.getElementById('h-spd').textContent = speed.toFixed(1);
+  document.getElementById('h-alt').textContent = alt.toFixed(0);
   document.getElementById('h-pts').textContent = ++pointCount;
 
-  // Marcador actual
+  const tmpEl  = document.getElementById('h-tmp');
+  const barEl  = document.getElementById('temp-bar');
+  tmpEl.textContent      = temp !== null ? temp.toFixed(1) + ' °C' : '-- °C';
+  tmpEl.style.color      = color;
+  barEl.style.width      = tempPercent(temp) + '%';
+  barEl.style.background = color;
+
+  // ── Marcador vivo ─────────────────────
   if (liveMarker) map.removeLayer(liveMarker);
   liveMarker = L.marker([lat, lon], { icon: liveIcon })
     .bindPopup(`
-      <b>${lat.toFixed(5)}, ${lon.toFixed(5)}</b><br>
-      Alt: ${parseFloat(data.alt || 0).toFixed(0)} m &nbsp;|&nbsp; Vel: ${speed.toFixed(1)} km/h
-      ${temp !== null ? `<br>Temp: <b>${temp.toFixed(1)} °C</b>` : ''}
+      <div class="popup-coords">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+      <div class="popup-row">Alt &nbsp;<b>${alt.toFixed(0)} m</b> &nbsp;·&nbsp; Vel <b>${speed.toFixed(1)} km/h</b></div>
+      ${temp !== null
+        ? `<div class="popup-row" style="margin-top:4px">Temp &nbsp;<b style="color:${color}">${temp.toFixed(1)} °C</b></div>`
+        : ''}
     `)
     .addTo(map);
 
-  // Punto histórico (color por temperatura)
+  // ── Punto histórico con badge de temperatura ──
+  const hasTemp = temp !== null;
+
+  // Círculo coloreado
   L.circleMarker([lat, lon], {
-    radius: 4,
-    fillColor: temp !== null ? tempColor(temp) : '#475569',
-    color: '#fff', weight: 1, fillOpacity: 0.85
+    radius: hasTemp ? 5 : 4,
+    fillColor: color,
+    color: '#fff',
+    weight: 1,
+    fillOpacity: 0.9
   }).bindPopup(`
-    ${lat.toFixed(5)}, ${lon.toFixed(5)}
-    ${temp !== null ? `<br>Temp: <b>${temp.toFixed(1)} °C</b>` : ''}
+    <div class="popup-coords">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+    ${hasTemp
+      ? `<div class="popup-row">Temp &nbsp;<b style="color:${color}">${temp.toFixed(1)} °C</b></div>`
+      : '<div class="popup-row">Sin datos de temperatura</div>'}
   `).addTo(map);
+
+  // Badge de temperatura flotante
+  if (hasTemp) {
+    const badgeIcon = L.divIcon({
+      className: '',
+      html: `<div class="temp-badge" style="color:${color};background:rgba(6,10,18,0.82);border-color:${color}88">
+               ${temp.toFixed(1)}°
+             </div>`,
+      iconSize: [50, 18],
+      iconAnchor: [-6, 9]   // sale a la derecha del punto
+    });
+    L.marker([lat, lon], { icon: badgeIcon, interactive: false }).addTo(map);
+  }
 
   polyline.addLatLng([lat, lon]);
   if (pointCount <= 2) map.setView([lat, lon], 15);
-}
-
-function tempColor(t) {
-  if (t < 10) return '#22c55e';
-  if (t < 25) return '#facc15';
-  if (t < 35) return '#f97316';
-  return '#ef4444';
 }
 
 // ═══════════════════════════════════════
