@@ -12,6 +12,8 @@
 #define SerialAT Serial2
 #define SerialMon Serial
 
+// holaa
+
 // ── DS18B20 ───────────────────────────────────────────────
 OneWire oneWire(4);
 DallasTemperature tempSensor(&oneWire);
